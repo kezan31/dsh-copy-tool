@@ -1,0 +1,33 @@
+{
+  "name": "dsh-copy-tool",
+  "version": "0.1.0",
+  "description": "Enhanced line-selection copy tool for DeepSeek Harness.",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "copy",
+    "code-extraction"
+  ],
+  "license": "MIT",
+  "author": "kezan31",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kezan31/dsh-copy-tool.git"
+  },
+  "homepage": "https://github.com/kezan31/dsh-copy-tool#readme",
+  "bugs": {
+    "url": "https://github.com/kezan31/dsh-copy-tool/issues"
+  },
+  "type": "module",
+  "main": "index.js",
+  "files": ["index.js", "cordis.patch.yml", "README.md", "LICENSE"],
+  "engines": {
+    "node": ">=20"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
