@@ -17,13 +17,24 @@ It replaces the common `read` + manual `write` workflow when extracting a module
 - Preserve untouched content and filesystem-native line endings
 - Resolve paths relative to the current session workspace and respect its sandbox policy
 
-## Install in a DSH profile
+## Install
+
+### npm (recommended)
+
+```powershell
+cd $env:USERPROFILE\.dsh\profiles\web
+npm install dsh-copy-tool
+```
+
+Then add `dsh-copy-tool` to the `dsh.profile.bundles` array in `package.json`, and restart DSH Web.
+
+### dsh plugin command
 
 ```powershell
 dsh plugin --profile web add dsh-copy-tool
 ```
 
-Add `dsh-copy-tool` to the profile's bundle list if it is not added automatically, then restart DSH Web.
+If the bundle list is not updated automatically, add `dsh-copy-tool` to `dsh.profile.bundles` in the profile's `package.json` manually, then restart DSH Web.
 
 ## Usage
 
