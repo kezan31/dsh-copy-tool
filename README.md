@@ -8,14 +8,14 @@ It replaces the common `read` + manual `write` workflow when extracting a module
 
 ## Features
 
-- Extract individual 1-based lines or ascending ranges
-- Accept a string such as `633-889,910` or an array such as `[633, [640, 645], 700]`
-- Prepend a module header/docstring and imports
-- Preview generated content with `dry_run`
-- Configure section separators and the final newline
-- Atomically write UTF-8 files through the DSH filesystem service
-- Resolve paths relative to the current session workspace
-- Respect the current DSH sandbox policy
+- Copy individual 1-based lines or ranges to corresponding target lines
+- Use arrays such as `[[633, 889]]` or `[633, [640, 645], 700]` for both `lines` and `target_lines`
+- Strip common source indentation and add an explicit four-space `indent` level
+- Preview a bounded unified diff with required `dry_run`
+- Atomically create missing files with `writeText`
+- Atomically edit existing files (including the source file) with `editText`
+- Preserve untouched content and filesystem-native line endings
+- Resolve paths relative to the current session workspace and respect its sandbox policy
 
 ## Install in a DSH profile
 
@@ -27,30 +27,33 @@ Add `dsh-copy-tool` to the profile's bundle list if it is not added automaticall
 
 ## Usage
 
-Call the `copy` tool with `source_file`, `target_file`, and `lines`:
+All parameters are required. Expanded `lines` and `target_lines` must select the same number of lines; each source line maps to the target line at the same position:
 
 ```json
 {
-  "source_file": "auto_supplement_duckdb_data.py",
-  "target_file": "reporting.py",
-  "lines": "633-889",
-  "header": "\"\"\"Reporting module.\"\"\"",
-  "imports": "import json\nfrom xxx import yyy"
+  "source_file": "source.py",
+  "target_file": "module.py",
+  "lines": [[633, 644]],
+  "target_lines": [[1, 12]],
+  "indent": 0,
+  "dry_run": true
 }
 ```
 
-The `lines` value can also be an array:
+A line list can mix individual numbers and ranges:
 
 ```json
 {
   "source_file": "source.py",
   "target_file": "module.py",
   "lines": [633, [640, 645], 700],
-  "dry_run": true
+  "target_lines": [1, [2, 7], 8],
+  "indent": 1,
+  "dry_run": false
 }
 ```
 
-Line numbers are 1-based. The tool preserves the requested order, adds a final newline by default, and returns a bounded preview with the extracted-line count.
+Line numbers are 1-based. Source indentation common to all selected non-empty lines is removed, then `indent * 4` spaces are added. Existing targets are edited in place while preserving untouched content; a missing target must use continuous `target_lines` beginning at 1 and is created as a new file. Use `dry_run` to inspect the diff before writing.
 
 ## License
 
