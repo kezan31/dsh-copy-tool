@@ -17,13 +17,24 @@
 - 保留未选中的内容和文件系统原生换行符
 - 相对路径以当前会话工作区为基准并遵守沙箱策略
 
-## 在 DSH profile 中安装
+## 安装
+
+### npm（推荐）
+
+```powershell
+cd $env:USERPROFILE\.dsh\profiles\web
+npm install dsh-copy-tool
+```
+
+然后在 `package.json` 的 `dsh.profile.bundles` 数组中添加 `"dsh-copy-tool"`，重启 DSH Web。
+
+### dsh plugin 命令
 
 ```powershell
 dsh plugin --profile web add dsh-copy-tool
 ```
 
-如果 profile 没有自动加入 `dsh-copy-tool` bundle，请手动加入后重启 DSH Web。
+如果 bundle 列表未自动更新，请手动在 profile 的 `package.json` 中将 `dsh-copy-tool` 加入 `dsh.profile.bundles`，然后重启 DSH Web。
 
 ## 使用方式
 
