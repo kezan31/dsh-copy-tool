@@ -4,7 +4,7 @@
 
 An enhanced line-selection copy plugin for [DeepSeek Harness](https://github.com/deepseek-ai/dsh).
 
-It replaces the common `read` + manual `write` workflow when extracting a module from a larger source file.
+It addresses omissions and oversimplification when using the write tool to refactor large projects by speeding up refactoring calls, saving substantial tokens, and migrating modules while preserving their source-line content.
 
 ## Features
 
