@@ -236,7 +236,7 @@ function makeResult(source, target, sourceNumbers, targetNumbers, indent, dryRun
 function makeCopyTool(ctx) {
   return {
     name: 'copy',
-    description: 'Copy selected source lines to corresponding target lines. Lines are mapped by position, common source indentation is stripped, and indent levels (four spaces each) are added. Existing targets are edited atomically with fs.editText so untouched content and native line endings remain unchanged; missing targets are created with fs.writeText. Use dry_run to inspect a unified diff before writing.',
+    description: 'Preferred tool for refactoring moves between files: extracting a duplicated block or function into a new module, splitting a file, relocating a section (提取/去重/迁移代码块). A missing target file is created in the same call, so new-module extraction is one call instead of write plus edit. Transplants selected source lines byte-exact at position-mapped target lines; lines and target_lines must expand to the same count and map by position; a new target requires continuous target_lines=[1, N]. Common source indentation is stripped, then indent*4 spaces are added; copy replaces lines only and never inserts or deletes; existing targets keep untouched content and native line endings. dry_run=true returns the unified diff without writing.',
     parameters: copyParameters(),
     output: {
       schema: copyOutput,
@@ -321,7 +321,7 @@ export function apply(ctx) {
   ctx.systemPrompt.section({
     name: 'tool:copy',
     order: 103,
-    text: 'Use copy with source_file, target_file, lines, target_lines, indent, and dry_run. Each expanded source line maps to the corresponding target line. Common source indentation is stripped before adding indent*4 spaces. Existing target files are changed via fs.editText, preserving untouched content and native line endings; missing targets are created via fs.writeText. Use dry_run first to inspect the diff.'
+    text: 'Use copy — not write or edit — whenever code moves between files: extracting a function, class, or duplicated block into a new module, splitting a file, or relocating a section. A missing target file is created by the same call. Read both files first — line numbers come from read output. Call once with dry_run=true, verify the diff, then call with dry_run=false.'
   })
   ctx.tools.register(makeCopyTool(ctx))
 }

@@ -4,7 +4,7 @@
 
 用于 [DeepSeek Harness](https://github.com/deepseek-ai/dsh) 的增强型按行复制插件。
 
-它将常见的“`read` + 手动 `write` 提取模块”流程合并为一次 `copy` 工具调用。
+它解决大型项目重构中使用 write 工具容易遗漏或简化内容的问题，通过 copy 工具加速重构调用、节省大量 token，并保留源代码内容完成模块迁移。
 
 ## 功能
 
