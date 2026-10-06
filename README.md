@@ -2,19 +2,20 @@
 
 [中文说明](README.zh.md)
 
-An enhanced line-selection copy plugin for [DeepSeek Harness](https://github.com/deepseek-ai/dsh).
+An enhanced line-selection copy plugin for [DeepSeek Harness](https://deepseek-harness.github.io/deepseek-harness/).
 
 It addresses omissions and oversimplification when using the write tool to refactor large projects by speeding up refactoring calls, saving substantial tokens, and migrating modules while preserving their source-line content.
 
 ## Features
 
 - Copy individual 1-based lines or ranges to corresponding target lines
-- Use arrays such as `[[633, 889]]` or `[633, [640, 645], 700]` for both `lines` and `target_lines`
-- Strip common source indentation and add an explicit four-space `indent` level
+- Replace targets with `target_lines`, or insert before a target line with `insert_at`
+- Append directly with `insert_at: "end"` without placeholder lines
+- Use arrays such as `[[633, 889]]` or `[633, [640, 645], 700]` for `lines` and `target_lines`
+- Strip common indentation from non-empty source lines and add an explicit four-space `indent` level
 - Preview a bounded unified diff with required `dry_run`
-- Atomically create missing files with `writeText`
-- Atomically edit existing files (including the source file) with `editText`
-- Preserve untouched content and filesystem-native line endings
+- Atomically update existing targets and create missing replacement targets
+- Preserve untouched content and calculated line endings, including mixed-ending targets
 - Resolve paths relative to the current session workspace and respect its sandbox policy
 
 ## Install
@@ -38,7 +39,11 @@ If the bundle list is not updated automatically, add `dsh-copy-tool` to `dsh.pro
 
 ## Usage
 
-All parameters are required. Expanded `lines` and `target_lines` must select the same number of lines; each source line maps to the target line at the same position:
+The base parameters are required. Provide exactly one of `target_lines` and `insert_at`.
+
+### Replace corresponding target lines
+
+Expanded `lines` and `target_lines` must select the same number of lines; each source line maps to the target line at the same position:
 
 ```json
 {
@@ -64,7 +69,22 @@ A line list can mix individual numbers and ranges:
 }
 ```
 
-Line numbers are 1-based. Source indentation common to all selected non-empty lines is removed, then `indent * 4` spaces are added. Existing targets are edited in place while preserving untouched content; a missing target must use continuous `target_lines` beginning at 1 and is created as a new file. Use `dry_run` to inspect the diff before writing.
+### Insert or append source lines
+
+`insert_at` is a 1-based target line number and inserts before that line. Use `"end"` to append after the final target line:
+
+```json
+{
+  "source_file": "MOD.md",
+  "target_file": "回复格式.md",
+  "lines": [[1, 254]],
+  "insert_at": "end",
+  "indent": 0,
+  "dry_run": true
+}
+```
+
+Line numbers are 1-based. Source indentation common to selected non-empty lines is removed, then `indent * 4` spaces are added; whitespace-only lines keep their original content. `target_lines` and `insert_at` are mutually exclusive. Insertion requires an existing target file, while a missing target is created only by replacement with continuous `target_lines` beginning at 1. Use `dry_run: true` to inspect the diff before writing, then repeat with `dry_run: false` after approval.
 
 ## License
 
