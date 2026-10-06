@@ -41,6 +41,12 @@ function parseBoolean(value, name) {
   return value
 }
 
+function parseInsertAt(value) {
+  if (value === 'end') return value
+  if (!Number.isInteger(value) || value < 1) throw new Error('insert_at must be a positive integer or "end"')
+  return value
+}
+
 /*
  * Keep line endings attached to their lines. The filesystem service returns text
  * as-is, so normalizing to LF here would silently rewrite unrelated target text.
@@ -90,10 +96,39 @@ function transformLines(lines, indent) {
   const common = commonIndent(lines)
   const prefix = ' '.repeat(indent * 4)
   return lines.map((line) => {
+    if (line.text.trim().length === 0) return { text: line.text, ending: line.ending }
     const stripped = line.text.slice(common)
-    if (stripped.trim().length === 0) return { text: stripped, ending: line.ending }
     return { text: prefix + stripped, ending: line.ending }
   })
+}
+
+function preferredEnding(lines) {
+  return lines.find((line) => line.ending !== '')?.ending
+}
+
+function hasMixedEndings(lines) {
+  const endings = new Set(lines.map((line) => line.ending).filter((ending) => ending !== ''))
+  return endings.size > 1
+}
+
+function insertionPoint(value, targetLines) {
+  const line = value === 'end' ? targetLines.length + 1 : value
+  if (line > targetLines.length + 1) throw new Error(`insert_at ${line} exceeds target insertion range 1-${targetLines.length + 1}`)
+  return { line, index: line - 1 }
+}
+
+function prepareInsertion(transformed, targetLines, index) {
+  const ending = preferredEnding(targetLines) ?? preferredEnding(transformed) ?? '\n'
+  const appending = index === targetLines.length
+  const lastSourceHasEnding = transformed.at(-1).ending !== ''
+  const inserted = transformed.map((line, lineIndex) => ({
+    text: line.text,
+    ending: lineIndex === transformed.length - 1 && appending && !lastSourceHasEnding ? '' : ending
+  }))
+  const nextLines = targetLines.slice()
+  if (index > 0 && nextLines[index - 1].ending === '') nextLines[index - 1] = { ...nextLines[index - 1], ending }
+  nextLines.splice(index, 0, ...inserted)
+  return { inserted, lines: nextLines }
 }
 
 function continuousFromOne(numbers) {
@@ -125,6 +160,11 @@ function diffForEdit(target, before, after, targetNumbers) {
   return `--- ${target.displayPath}\n+++ ${target.displayPath}\n${changed.join('\n')}`
 }
 
+function diffForInsert(target, inserted, line) {
+  const body = inserted.map((entry) => `+${displayLine(entry.text)}`).join('\n')
+  return `--- ${target.displayPath}\n+++ ${target.displayPath}\n@@ -${line - 1},0 +${line},${inserted.length} @@\n${body}`
+}
+
 function preview(value) {
   return value.length <= PREVIEW_LIMIT ? value : `${value.slice(0, PREVIEW_LIMIT)}\n...[preview truncated]`
 }
@@ -151,7 +191,12 @@ async function readFile(ctx, target, exec) {
   if (info === undefined) return undefined
   if (info.type !== 'file') throw new Error(`path is not a regular file: ${target.displayPath}`)
   const text = await ctx.fs.readText(target, exec.signal)
-  return { text, lines: splitFile(text) }
+  return { text, lines: splitFile(text), version: info.version }
+}
+
+async function writeExistingFile(ctx, target, file, output, exec, policy) {
+  const expected = file.version === undefined ? undefined : { kind: 'replaceIfVersion', version: file.version }
+  return ctx.fs.writeText(target, output, expected, exec.signal, { ...policy })
 }
 
 function sameTarget(sourceTarget, target) {
@@ -160,27 +205,40 @@ function sameTarget(sourceTarget, target) {
 }
 
 function copyParameters() {
+  const lineNumber = { type: 'integer', minimum: 1 }
   const lineSpec = {
     type: 'array',
+    minItems: 1,
     items: {
       oneOf: [
-        { type: 'integer' },
-        { type: 'array', items: { type: 'integer' } }
+        lineNumber,
+        { type: 'array', minItems: 2, maxItems: 2, items: lineNumber }
       ]
     }
+  }
+  const insertAtSpec = {
+    oneOf: [
+      { type: 'integer', minimum: 1 },
+      { type: 'string', enum: ['end'] }
+    ]
   }
   return {
     type: 'object',
     additionalProperties: false,
     properties: {
-      source_file: { type: 'string' },
-      target_file: { type: 'string' },
+      source_file: { type: 'string', minLength: 1 },
+      target_file: { type: 'string', minLength: 1 },
       lines: lineSpec,
       target_lines: lineSpec,
-      indent: { type: 'integer' },
+      insert_at: insertAtSpec,
+      indent: { type: 'integer', minimum: 0 },
       dry_run: { type: 'boolean' }
     },
-    required: ['source_file', 'target_file', 'lines', 'target_lines', 'indent', 'dry_run']
+    required: ['source_file', 'target_file', 'lines', 'indent', 'dry_run'],
+    oneOf: [
+      { required: ['target_lines'] },
+      { required: ['insert_at'] }
+    ]
   }
 }
 
@@ -191,8 +249,10 @@ const copyOutput = {
     success: { type: 'boolean' },
     source_file: { type: 'string' },
     target_file: { type: 'string' },
+    operation: { type: 'string', enum: ['replace', 'insert'] },
     lines_extracted: { type: 'integer' },
     target_lines_replaced: { type: 'integer' },
+    target_lines_inserted: { type: 'integer' },
     first_line: { type: 'integer' },
     last_line: { type: 'integer' },
     first_target_line: { type: 'integer' },
@@ -207,20 +267,22 @@ const copyOutput = {
     before: { oneOf: [{ type: 'string' }, { type: 'null' }] },
     after: { type: 'string' }
   },
-  required: ['success', 'source_file', 'target_file', 'lines_extracted', 'target_lines_replaced', 'first_line', 'last_line', 'first_target_line', 'last_target_line', 'characters_written', 'indent', 'dry_run', 'written', 'changed', 'preview', 'diff', 'before', 'after']
+  required: ['success', 'source_file', 'target_file', 'operation', 'lines_extracted', 'target_lines_replaced', 'target_lines_inserted', 'first_line', 'last_line', 'first_target_line', 'last_target_line', 'characters_written', 'indent', 'dry_run', 'written', 'changed', 'preview', 'diff', 'before', 'after']
 }
 
-function makeResult(source, target, sourceNumbers, targetNumbers, indent, dryRun, changed, written, output, diff, previewText, before) {
+function makeResult(source, target, sourceNumbers, targetNumbers, indent, dryRun, changed, written, output, diff, previewText, before, operation = 'replace', targetLinesInserted = 0, firstTargetLine = targetNumbers[0], lastTargetLine = targetNumbers.at(-1)) {
   return {
     success: true,
     source_file: source.target.displayPath,
     target_file: target.displayPath,
+    operation,
     lines_extracted: sourceNumbers.length,
     target_lines_replaced: targetNumbers.length,
+    target_lines_inserted: targetLinesInserted,
     first_line: sourceNumbers[0],
     last_line: sourceNumbers.at(-1),
-    first_target_line: targetNumbers[0],
-    last_target_line: targetNumbers.at(-1),
+    first_target_line: firstTargetLine,
+    last_target_line: lastTargetLine,
     characters_written: output.length,
     indent,
     dry_run: dryRun,
@@ -236,7 +298,7 @@ function makeResult(source, target, sourceNumbers, targetNumbers, indent, dryRun
 function makeCopyTool(ctx) {
   return {
     name: 'copy',
-    description: 'Preferred tool for refactoring moves between files: extracting a duplicated block or function into a new module, splitting a file, relocating a section (提取/去重/迁移代码块). A missing target file is created in the same call, so new-module extraction is one call instead of write plus edit. Transplants selected source lines byte-exact at position-mapped target lines; lines and target_lines must expand to the same count and map by position; a new target requires continuous target_lines=[1, N]. Common source indentation is stripped, then indent*4 spaces are added; copy replaces lines only and never inserts or deletes; existing targets keep untouched content and native line endings. dry_run=true returns the unified diff without writing.',
+    description: 'Preferred tool for refactoring moves between files: extracting a duplicated block or function into a new module, splitting a file, relocating or inserting a section (提取/去重/迁移/插入代码块). Use target_lines for position-mapped replacement, or insert_at for insertion before a 1-based target line or at the end with "end"; these modes are mutually exclusive. A missing target file is created only for replacement with continuous target_lines=[1, N]. Common source indentation is stripped, then indent*4 spaces are added; existing targets keep untouched content and native line endings where possible. dry_run=true returns the unified diff without writing.',
     parameters: copyParameters(),
     output: {
       schema: copyOutput,
@@ -272,8 +334,12 @@ function makeCopyTool(ctx) {
       const targetPath = await resolvePath(ctx, args.target_file, exec, policy)
       const source = { target: sourcePath, ...sourceFile }
       const sourceNumbers = parseLines(args.lines, 'lines')
-      const targetNumbers = parseLines(args.target_lines, 'target_lines')
-      if (sourceNumbers.length !== targetNumbers.length) throw new Error(`lines and target_lines must select the same number of lines (got ${sourceNumbers.length} and ${targetNumbers.length})`)
+      const hasTargetLines = args.target_lines !== undefined
+      const hasInsertAt = args.insert_at !== undefined
+      if (hasTargetLines === hasInsertAt) throw new Error('provide exactly one of target_lines or insert_at')
+      const targetNumbers = hasTargetLines ? parseLines(args.target_lines, 'target_lines') : []
+      if (hasTargetLines && sourceNumbers.length !== targetNumbers.length) throw new Error(`lines and target_lines must select the same number of lines (got ${sourceNumbers.length} and ${targetNumbers.length})`)
+      const insertAt = hasInsertAt ? parseInsertAt(args.insert_at) : undefined
       const indent = parseIndent(args.indent)
       const dryRun = parseBoolean(args.dry_run, 'dry_run')
       const selected = selectedLines(source.lines, sourceNumbers)
@@ -281,6 +347,7 @@ function makeCopyTool(ctx) {
       const targetFile = await readFile(ctx, targetPath, exec)
 
       if (targetFile === undefined) {
+        if (insertAt !== undefined) throw new Error(`insert_at requires an existing target file: ${targetPath.displayPath}`)
         if (sameTarget(sourcePath, targetPath)) throw new Error(`target file not found: ${targetPath.displayPath}`)
         if (!continuousFromOne(targetNumbers)) throw new Error('target_lines for a new file must be continuous starting at 1')
         const outputLines = transformed.map((line, index) => {
@@ -296,6 +363,16 @@ function makeCopyTool(ctx) {
         return makeResult(source, targetPath, sourceNumbers, targetNumbers, indent, dryRun, true, !dryRun, output, diff, output, null)
       }
 
+      if (insertAt !== undefined) {
+        const point = insertionPoint(insertAt, targetFile.lines)
+        const prepared = prepareInsertion(transformed, targetFile.lines, point.index)
+        const output = serializeLines(prepared.lines)
+        const changed = output !== targetFile.text
+        const diff = diffForInsert(targetPath, prepared.inserted, point.line)
+        if (!dryRun && changed) await writeExistingFile(ctx, targetPath, targetFile, output, exec, policy)
+        return makeResult(source, targetPath, sourceNumbers, targetNumbers, indent, dryRun, changed, !dryRun && changed, output, diff, serializeLines(prepared.inserted), targetFile.text, 'insert', prepared.inserted.length, point.line, point.line + prepared.inserted.length - 1)
+      }
+
       if (targetNumbers.some((number) => number > targetFile.lines.length)) {
         throw new Error(`requested target line exceeds target file length of ${targetFile.lines.length}`)
       }
@@ -308,9 +385,13 @@ function makeCopyTool(ctx) {
       const changed = output !== targetFile.text
       const diff = diffForEdit(targetPath, targetFile.lines, nextLines, targetNumbers)
       if (!dryRun && changed) {
-        const oldString = targetFile.text
-        const newString = output
-        await ctx.fs.editText(targetPath, { oldString, newString, replaceAll: false }, undefined, exec.signal, policy)
+        if (hasMixedEndings(targetFile.lines)) {
+          await writeExistingFile(ctx, targetPath, targetFile, output, exec, policy)
+        } else {
+          const oldString = targetFile.text
+          const newString = output
+          await ctx.fs.editText(targetPath, { oldString, newString, replaceAll: false }, undefined, exec.signal, policy)
+        }
       }
       return makeResult(source, targetPath, sourceNumbers, targetNumbers, indent, dryRun, changed, !dryRun && changed, output, diff, serializeLines(transformed), targetFile.text)
     }
@@ -321,7 +402,7 @@ export function apply(ctx) {
   ctx.systemPrompt.section({
     name: 'tool:copy',
     order: 103,
-    text: 'Use copy — not write or edit — whenever code moves between files: extracting a function, class, or duplicated block into a new module, splitting a file, or relocating a section. A missing target file is created by the same call. Read both files first — line numbers come from read output. Call once with dry_run=true, verify the diff, then call with dry_run=false.'
+    text: 'Use copy — not write or edit — whenever code moves between files: extracting a function, class, or duplicated block into a new module, splitting a file, or relocating or inserting a section. Use target_lines for replacement or insert_at for insertion before a 1-based target line or at the end with "end"; provide exactly one. A missing target file is created only for replacement. Read both files first — line numbers come from read output. Call once with dry_run=true, verify the diff, then call with dry_run=false.'
   })
   ctx.tools.register(makeCopyTool(ctx))
 }
