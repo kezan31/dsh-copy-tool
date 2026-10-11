@@ -1,6 +1,6 @@
 {
   "name": "dsh-copy-tool",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Enhanced line-selection copy tool for DeepSeek Harness.",
   "keywords": [
     "deepseek-harness",
